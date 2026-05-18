@@ -13,8 +13,8 @@ export type DetectedClip = {
 export async function detectClips(transcriptText: string, duration: number): Promise<DetectedClip[]> {
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing");
   const system =
-    "You are an expert short-form video editor. Given a podcast transcript, identify the 5 most viral 30-90 second moments. Score by hook strength, emotional payoff, and shareability. Return JSON [...]
-  const user = `Transcript (duration ${duration}s):\n${transcriptText}\n\nReturn JSON: { "clips": [{ "title": string, "hook": string, "start_seconds": number, "end_seconds": number, "virality_scor[...]
+    "You are an expert short-form video editor. Given a podcast transcript, identify the 5 most viral 30-90 second moments. Score by hook strength, emotional payoff, and shareability. Return JSON array with clips.";
+  const user = `Transcript (duration ${duration}s):\n${transcriptText}\n\nReturn JSON: { "clips": [{ "title": string, "hook": string, "start_seconds": number, "end_seconds": number, "virality_score": number }] }`;
 
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
