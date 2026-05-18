@@ -1,11 +1,9 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "buildCommand": "npm run build && pip3 install --break-system-packages yt-dlp"
+    "buildCommand": "npm run build"
   },
   "deploy": {
-    "startCommand": "node dist/index.js",
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
+    "startCommand": "node dist/index.js"
   }
 }
