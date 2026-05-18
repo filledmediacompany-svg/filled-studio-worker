@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "buildAptPackages": [
+    "ffmpeg",
+    "python3",
+    "python3-pip",
+    "curl",
+    "ca-certificates",
+    "fonts-dejavu-core",
+    "fontconfig"
+  ],
+  "buildCommand": "pip3 install --break-system-packages yt-dlp",
+  "deploy": {
+    "aptPackages": [
+      "ffmpeg",
+      "python3",
+      "python3-pip",
+      "curl",
+      "ca-certificates",
+      "fonts-dejavu-core",
+      "fontconfig"
+    ],
+    "startCommand": "node dist/index.js"
+  }
+}
