@@ -1,5 +1,8 @@
 {
-  "$schema": "https://railway.app/railway.schema.json",
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "npm run build && pip3 install yt-dlp"
+  },
   "deploy": {
     "startCommand": "node dist/index.js",
     "restartPolicyType": "ON_FAILURE",
