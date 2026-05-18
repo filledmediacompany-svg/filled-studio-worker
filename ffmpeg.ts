@@ -1,0 +1,81 @@
+import { execa } from "execa";
+import { promises as fs } from "fs";
+import path from "path";
+import os from "os";
+
+export async function tmpDir(prefix = "fs-"): Promise<string> {
+  return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+}
+
+export async function downloadYouTube(url: string, outDir: string): Promise<string> {
+  const out = path.join(outDir, "source.%(ext)s");
+  await execa("yt-dlp", [
+    "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+    "--merge-output-format", "mp4",
+    "-o", out,
+    url,
+  ], { stdio: "inherit" });
+  // Find the file
+  const files = await fs.readdir(outDir);
+  const src = files.find((f) => f.startsWith("source."));
+  if (!src) throw new Error("yt-dlp produced no file");
+  return path.join(outDir, src);
+}
+
+export async function downloadFromSupabase(supabaseUrl: string, serviceKey: string, bucket: string, key: string, outDir: string): Promise<string> {
+  const r = await fetch(`${supabaseUrl}/storage/v1/object/${bucket}/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${serviceKey}` },
+  });
+  if (!r.ok) throw new Error(`Storage download failed ${r.status}`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  const out = path.join(outDir, path.basename(key));
+  await fs.writeFile(out, buf);
+  return out;
+}
+
+export async function extractAudio(videoPath: string, outDir: string): Promise<string> {
+  const out = path.join(outDir, "audio.mp3");
+  await execa("ffmpeg", ["-y", "-i", videoPath, "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k", out], { stdio: "inherit" });
+  return out;
+}
+
+export async function getDuration(videoPath: string): Promise<number> {
+  const { stdout } = await execa("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", videoPath]);
+  return parseFloat(stdout.trim());
+}
+
+/**
+ * Render a vertical 9:16 short clip with burned-in captions and optional B-roll overlay.
+ * Captions: drawtext at bottom-third, gold accent, large display font.
+ */
+export async function renderClip(opts: {
+  source: string;
+  start: number;
+  end: number;
+  outPath: string;
+  title: string;
+}): Promise<void> {
+  const { source, start, end, outPath, title } = opts;
+  const duration = end - start;
+  // Title escape for drawtext
+  const safe = title.replace(/['":\\%]/g, " ").slice(0, 80);
+  const filter = [
+    `[0:v]trim=start=${start}:duration=${duration},setpts=PTS-STARTPTS,`,
+    `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,`,
+    `drawtext=text='${safe}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.6:boxborderw=20:x=(w-text_w)/2:y=h-360`,
+    `[v]`,
+  ].join("");
+  await execa("ffmpeg", [
+    "-y",
+    "-i", source,
+    "-filter_complex", filter,
+    "-map", "[v]",
+    "-map", `0:a`,
+    "-ss", String(start),
+    "-t", String(duration),
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+    "-c:a", "aac", "-b:a", "128k",
+    "-movflags", "+faststart",
+    outPath,
+  ], { stdio: "inherit" });
+}

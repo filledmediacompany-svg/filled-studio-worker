@@ -1,0 +1,56 @@
+import { createClient } from "@supabase/supabase-js";
+
+const SUPABASE_URL = process.env.SUPABASE_URL!;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required");
+}
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
+
+export type Project = {
+  id: string;
+  user_id: string;
+  title: string;
+  source_type: "youtube" | "upload";
+  source_url: string | null;
+  source_storage_key: string | null;
+  status: string;
+  duration_seconds: number | null;
+};
+
+export async function claimNextProject(): Promise<Project | null> {
+  // Atomic-ish claim: pick oldest queued, mark processing
+  const { data: queued } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("status", "queued")
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (!queued || queued.length === 0) return null;
+
+  const id = queued[0].id;
+  const { data, error } = await supabase
+    .from("projects")
+    .update({ status: "processing", error_message: null })
+    .eq("id", id)
+    .eq("status", "queued")
+    .select()
+    .single();
+  if (error || !data) return null;
+  return data as Project;
+}
+
+export async function setStatus(projectId: string, status: string, fields: Record<string, unknown> = {}) {
+  await supabase.from("projects").update({ status, ...fields }).eq("id", projectId);
+}
+
+export async function setError(projectId: string, msg: string) {
+  await supabase
+    .from("projects")
+    .update({ status: "failed", error_message: msg.slice(0, 500) })
+    .eq("id", projectId);
+}
