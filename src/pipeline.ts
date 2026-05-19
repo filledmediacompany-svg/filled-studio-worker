@@ -40,6 +40,7 @@ export async function processProject(project: Project): Promise<void> {
     await persistTranscriptWords(project, transcript.words);
 
     // 4. AI clip detection
+    await setStatus(project.id, "detecting_clips");
     const detected = await detectClips(transcript.text, duration);
     console.log(`[${project.id}] detected ${detected.length} clips`);
 
@@ -61,7 +62,7 @@ export async function processProject(project: Project): Promise<void> {
     for (const clip of insertedClips ?? []) {
       const outPath = path.join(work, `clip-${clip.id}.mp4`);
       try {
-        await createRenderJob(clip.id, project.id, project.user_id, "processing");
+        await createRenderJob(clip.id, project.id, project.user_id, "running");
         await renderClip({
           source: srcPath,
           start: Number(clip.start_seconds),
@@ -82,8 +83,8 @@ export async function processProject(project: Project): Promise<void> {
           status: "rendered",
           output_url: pub.publicUrl,
         }).eq("id", clip.id);
-        await finishRenderJob(clip.id, "ready", pub.publicUrl);
-        console.log(`[${project.id}] clip ${clip.id} ready`);
+        await finishRenderJob(clip.id, "completed", pub.publicUrl);
+        console.log(`[${project.id}] clip ${clip.id} rendered`);
       } catch (e) {
         console.error(`[${project.id}] clip ${clip.id} failed`, e);
         await supabase.from("clips").update({ status: "failed" }).eq("id", clip.id);
@@ -108,11 +109,16 @@ async function persistTranscriptWords(
 ): Promise<void> {
   if (words.length === 0) return;
 
+  const { error: deleteError } = await supabase.from("transcript_words").delete().eq("project_id", project.id);
+  if (deleteError) {
+    console.warn(`[${project.id}] transcript_words delete skipped: ${deleteError.message}`);
+  }
+
   for (let i = 0; i < words.length; i += WORD_BATCH_SIZE) {
     const rows = words.slice(i, i + WORD_BATCH_SIZE).map((word, index) => ({
       project_id: project.id,
       user_id: project.user_id,
-      word_index: i + index,
+      position: i + index,
       word: word.word,
       start_seconds: word.start,
       end_seconds: word.end,
@@ -150,7 +156,6 @@ async function persistClipStudioFields(insertedClips: any[], detected: DetectedC
 async function createRenderJob(clipId: string, projectId: string, userId: string, status: string): Promise<void> {
   const { error } = await supabase.from("render_jobs").insert({
     clip_id: clipId,
-    project_id: projectId,
     user_id: userId,
     status,
     progress: 0,
@@ -168,7 +173,7 @@ async function finishRenderJob(
 ): Promise<void> {
   const fields: Record<string, unknown> = {
     status,
-    progress: status === "ready" ? 100 : 0,
+    progress: status === "completed" ? 100 : 0,
     output_url: outputUrl,
     error_message: errorMessage?.slice(0, 500) ?? null,
   };

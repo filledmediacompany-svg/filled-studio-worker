@@ -27,13 +27,17 @@ export type Project = {
 };
 
 export async function claimNextProject(): Promise<Project | null> {
-  // Atomic-ish claim: pick oldest queued, mark processing
-  const { data: queued } = await supabase
+  // Atomic-ish claim: pick oldest queued, mark downloading.
+  const { data: queued, error: listError } = await supabase
     .from("projects")
     .select("id")
     .eq("status", "queued")
     .order("created_at", { ascending: true })
     .limit(1);
+  if (listError) {
+    console.error("Failed to list queued projects", listError);
+    return null;
+  }
   if (!queued || queued.length === 0) return null;
 
   const id = queued[0].id;
@@ -44,12 +48,17 @@ export async function claimNextProject(): Promise<Project | null> {
     .eq("status", "queued")
     .select()
     .single();
-  if (error || !data) return null;
+  if (error || !data) {
+    console.error("Failed to claim queued project", { id, error });
+    return null;
+  }
+  console.log(`[${id}] claimed queued project`);
   return data as Project;
 }
 
 export async function setStatus(projectId: string, status: string, fields: Record<string, unknown> = {}) {
-  await supabase.from("projects").update({ status, ...fields }).eq("id", projectId);
+  const { error } = await supabase.from("projects").update({ status, ...fields }).eq("id", projectId);
+  if (error) console.error(`[${projectId}] failed to set project status ${status}`, error);
 }
 
 export async function setError(projectId: string, msg: string) {
