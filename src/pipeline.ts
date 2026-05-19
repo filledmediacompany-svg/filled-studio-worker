@@ -26,7 +26,7 @@ export async function processProject(project: Project): Promise<void> {
 
     // 2. Probe duration
     const duration = await getDuration(srcPath);
-    await setStatus(project.id, "processing", { duration_seconds: Math.round(duration) });
+    await setStatus(project.id, "transcribing", { duration_seconds: Math.round(duration) });
 
     // 3. Audio + transcribe
     const audio = await extractAudio(srcPath, work);
@@ -75,7 +75,7 @@ export async function processProject(project: Project): Promise<void> {
         if (upErr) throw upErr;
         const { data: pub } = supabase.storage.from("renders").getPublicUrl(key);
         await supabase.from("clips").update({
-          status: "ready",
+          status: "rendered",
           output_url: pub.publicUrl,
         }).eq("id", clip.id);
         console.log(`[${project.id}] clip ${clip.id} ready`);

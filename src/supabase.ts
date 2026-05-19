@@ -39,7 +39,7 @@ export async function claimNextProject(): Promise<Project | null> {
   const id = queued[0].id;
   const { data, error } = await supabase
     .from("projects")
-    .update({ status: "processing", error_message: null })
+    .update({ status: "downloading", error_message: null })
     .eq("id", id)
     .eq("status", "queued")
     .select()
