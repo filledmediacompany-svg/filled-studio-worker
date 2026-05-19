@@ -7,6 +7,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 export type Transcript = {
   text: string;
   segments: Array<{ start: number; end: number; text: string }>;
+  words: Array<{ word: string; start: number; end: number }>;
 };
 
 /** OpenAI Whisper API. Returns verbose_json with segments. */
@@ -18,6 +19,7 @@ export async function transcribe(audioPath: string): Promise<Transcript> {
   form.append("model", "whisper-1");
   form.append("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "segment");
+  form.append("timestamp_granularities[]", "word");
 
   const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
@@ -29,5 +31,6 @@ export async function transcribe(audioPath: string): Promise<Transcript> {
   return {
     text: json.text,
     segments: (json.segments ?? []).map((s: any) => ({ start: s.start, end: s.end, text: s.text })),
+    words: (json.words ?? []).map((w: any) => ({ word: w.word, start: w.start, end: w.end })),
   };
 }
