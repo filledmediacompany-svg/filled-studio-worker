@@ -56,6 +56,28 @@ export async function claimNextProject(): Promise<Project | null> {
   return data as Project;
 }
 
+export async function requeueStaleProjects(maxAgeMinutes = 30): Promise<number> {
+  const cutoff = new Date(Date.now() - maxAgeMinutes * 60_000).toISOString();
+  const { data, error } = await supabase
+    .from("projects")
+    .update({
+      status: "queued",
+      error_message: `Automatically requeued after ${maxAgeMinutes} minutes without completion`,
+    })
+    .in("status", ["downloading", "transcribing", "detecting_clips"])
+    .lt("updated_at", cutoff)
+    .select("id");
+
+  if (error) {
+    console.error("Failed to requeue stale projects", error);
+    return 0;
+  }
+
+  const count = data?.length ?? 0;
+  if (count > 0) console.warn(`Requeued ${count} stale project(s) older than ${maxAgeMinutes} minutes`);
+  return count;
+}
+
 export async function setStatus(projectId: string, status: string, fields: Record<string, unknown> = {}) {
   const { error } = await supabase.from("projects").update({ status, ...fields }).eq("id", projectId);
   if (error) console.error(`[${projectId}] failed to set project status ${status}`, error);
