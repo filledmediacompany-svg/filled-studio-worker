@@ -1,6 +1,8 @@
 import fetch from "node-fetch";
 
 const LOVABLE_API_KEY = process.env.LOVABLE_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const CLIP_DETECTION_MODEL = process.env.CLIP_DETECTION_MODEL ?? "gpt-4o-mini";
 
 export type DetectedClip = {
   title: string;
@@ -14,10 +16,11 @@ export type DetectedClip = {
 };
 
 export async function detectClips(transcriptText: string, duration: number): Promise<DetectedClip[]> {
-  if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY missing");
   const system =
     "You are an expert short-form video editor. Given a podcast transcript, identify the 5 most viral 30-90 second moments. Score by hook strength, retention, emotional payoff, and shareability. Return JSON only.";
   const user = `Transcript (duration ${duration}s):\n${transcriptText}\n\nReturn JSON: { "clips": [{ "title": string, "hook": string, "start_seconds": number, "end_seconds": number, "virality_score": number, "hook_score": number, "retention_score": number, "transcript_excerpt": string }] }`;
+
+  if (!LOVABLE_API_KEY) return detectClipsWithOpenAI(system, user, duration);
 
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -29,6 +32,25 @@ export async function detectClips(transcriptText: string, duration: number): Pro
     }),
   });
   if (!res.ok) throw new Error(`AI gateway ${res.status}: ${await res.text()}`);
+  const json: any = await res.json();
+  const parsed = parseJsonContent(json.choices?.[0]?.message?.content);
+  const clips = Array.isArray(parsed.clips) ? parsed.clips : [];
+  return clips.map((clip: any) => normalizeClip(clip, duration));
+}
+
+async function detectClipsWithOpenAI(system: string, user: string, duration: number): Promise<DetectedClip[]> {
+  if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY missing");
+
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: CLIP_DETECTION_MODEL,
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      response_format: { type: "json_object" },
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenAI clip detection ${res.status}: ${await res.text()}`);
   const json: any = await res.json();
   const parsed = parseJsonContent(json.choices?.[0]?.message?.content);
   const clips = Array.isArray(parsed.clips) ? parsed.clips : [];

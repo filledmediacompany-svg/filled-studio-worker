@@ -12,8 +12,9 @@ This repo includes `render.yaml` and a Dockerfile. The Docker image installs the
 | Variable | Value |
 | --- | --- |
 | `SUPABASE_SERVICE_ROLE_KEY` | from Supabase Project Settings -> API |
-| `LOVABLE_API_KEY` | from Lovable Cloud -> AI Gateway |
 | `OPENAI_API_KEY` | your OpenAI key for transcription |
+| `LOVABLE_API_KEY` | optional; from Lovable Cloud -> AI Gateway. If omitted, clip detection uses OpenAI. |
+| `CLIP_DETECTION_MODEL` | optional; defaults to `gpt-4o-mini` |
 
 3. Confirm `SUPABASE_URL` is `https://abzfjfcfigshlkwgwdpy.supabase.co`.
 4. Deploy. `/health` should return `{ "ok": true, ... }`.
@@ -28,8 +29,9 @@ This repo includes `render.yaml` and a Dockerfile. The Docker image installs the
 | --- | --- |
 | `SUPABASE_URL` | `https://abzfjfcfigshlkwgwdpy.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | from Lovable Cloud → Backend → API keys |
-| `LOVABLE_API_KEY` | from Lovable Cloud → AI Gateway |
 | `OPENAI_API_KEY` | your OpenAI key (Whisper) |
+| `LOVABLE_API_KEY` | optional; from Lovable Cloud → AI Gateway. If omitted, clip detection uses OpenAI. |
+| `CLIP_DETECTION_MODEL` | `gpt-4o-mini` (optional) |
 | `POLL_INTERVAL_MS` | `5000` (optional) |
 
 4. Deploy. Watch logs — it should print `Filled Studio worker started.`
