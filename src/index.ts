@@ -1,5 +1,5 @@
 import { createServer } from "http";
-import { claimNextProject, requeueStaleProjects } from "./supabase.js";
+import { claimNextProject, isSupabaseConfigured, missingSupabaseEnv, requeueStaleProjects } from "./supabase.js";
 import { processProject } from "./pipeline.js";
 
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5000);
@@ -7,20 +7,24 @@ const PORT = Number(process.env.PORT ?? 3000);
 const STALE_PROJECT_MINUTES = Number(process.env.STALE_PROJECT_MINUTES ?? 30);
 
 type WorkerState = {
+  configured: boolean;
   currentProjectId: string | null;
   lastError: string | null;
   lastPollAt: string | null;
   lastProjectClaimedAt: string | null;
   lastStaleRequeueAt: string | null;
+  missingEnv: string[];
   startedAt: string;
 };
 
 const state: WorkerState = {
+  configured: isSupabaseConfigured,
   currentProjectId: null,
   lastError: null,
   lastPollAt: null,
   lastProjectClaimedAt: null,
   lastStaleRequeueAt: null,
+  missingEnv: missingSupabaseEnv,
   startedAt: new Date().toISOString(),
 };
 
@@ -45,6 +49,12 @@ async function loop() {
   console.log("Filled Studio worker started. Polling every", POLL_INTERVAL_MS, "ms");
   let processing = false;
   while (true) {
+    if (!isSupabaseConfigured) {
+      state.lastError = `Worker paused: missing ${missingSupabaseEnv.join(", ")}`;
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      continue;
+    }
+
     if (!processing) {
       processing = true;
       try {

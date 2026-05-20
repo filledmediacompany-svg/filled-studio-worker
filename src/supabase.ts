@@ -1,17 +1,26 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+export const SUPABASE_URL = process.env.SUPABASE_URL ?? "https://abzfjfcfigshlkwgwdpy.supabase.co";
+export const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error("Missing Supabase credentials!");
-  console.error("SUPABASE_URL:", SUPABASE_URL ? "✓ Set" : "✗ Missing");
-  console.error("SUPABASE_SERVICE_ROLE_KEY:", SUPABASE_SERVICE_ROLE_KEY ? "✓ Set" : "✗ Missing");
-  console.error("All environment variables:", Object.keys(process.env).filter(k => k.includes("SUPABASE") || k.includes("DATABASE")).sort());
-  process.exit(1);
+export const missingSupabaseEnv = [
+  SUPABASE_URL ? null : "SUPABASE_URL",
+  SUPABASE_SERVICE_ROLE_KEY ? null : "SUPABASE_SERVICE_ROLE_KEY",
+].filter((key): key is string => Boolean(key));
+
+export const isSupabaseConfigured = missingSupabaseEnv.length === 0;
+
+if (!isSupabaseConfigured) {
+  console.error("Missing Supabase credentials. Worker will stay healthy but paused until configured.");
+  console.error("SUPABASE_URL:", SUPABASE_URL ? "set" : "missing");
+  console.error("SUPABASE_SERVICE_ROLE_KEY:", SUPABASE_SERVICE_ROLE_KEY ? "set" : "missing");
+  console.error(
+    "Visible Supabase/database environment variables:",
+    Object.keys(process.env).filter((key) => key.includes("SUPABASE") || key.includes("DATABASE")).sort(),
+  );
 }
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+export const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY ?? "missing-service-role-key", {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
@@ -27,6 +36,8 @@ export type Project = {
 };
 
 export async function claimNextProject(): Promise<Project | null> {
+  if (!isSupabaseConfigured) return null;
+
   // Atomic-ish claim: pick oldest queued, mark downloading.
   const { data: queued, error: listError } = await supabase
     .from("projects")
@@ -57,6 +68,8 @@ export async function claimNextProject(): Promise<Project | null> {
 }
 
 export async function requeueStaleProjects(maxAgeMinutes = 30): Promise<number> {
+  if (!isSupabaseConfigured) return 0;
+
   const cutoff = new Date(Date.now() - maxAgeMinutes * 60_000).toISOString();
   const { data, error } = await supabase
     .from("projects")
