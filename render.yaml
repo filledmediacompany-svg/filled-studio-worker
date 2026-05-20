@@ -2,7 +2,7 @@ services:
   - type: web
     name: filled-studio-worker
     runtime: docker
-    plan: starter
+    plan: free
     healthCheckPath: /health
     autoDeploy: true
     envVars:
