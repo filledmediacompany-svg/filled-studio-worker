@@ -2,15 +2,31 @@
 
 Polls the `projects` table for `status = 'queued'`, downloads the source (YouTube via `yt-dlp` or Supabase Storage upload), transcribes with OpenAI Whisper, detects viral clips via Lovable AI, then renders 9:16 MP4s with FFmpeg and uploads to the `renders` bucket.
 
+## Deploy on Render
+
+This repo includes `render.yaml` and a Dockerfile. The Docker image installs the native tools the worker needs at runtime: `ffmpeg`, `ffprobe`, `python3`, `pip3`, fonts, and `yt-dlp`.
+
+1. Create a Render Blueprint from this GitHub repo, or create a Web Service using the Docker runtime.
+2. Add these secret env vars in Render:
+
+| Variable | Value |
+| --- | --- |
+| `SUPABASE_SERVICE_ROLE_KEY` | from Supabase Project Settings -> API |
+| `LOVABLE_API_KEY` | from Lovable Cloud -> AI Gateway |
+| `OPENAI_API_KEY` | your OpenAI key for transcription |
+
+3. Confirm `SUPABASE_URL` is `https://abzfjfcfigshlkwgwdpy.supabase.co`.
+4. Deploy. `/health` should return `{ "ok": true, ... }`.
+
 ## Deploy on Railway
 
 1. Create a new Railway project → "Deploy from GitHub" (push this `worker/` folder to a repo) **or** "Empty service" → upload zip.
-2. Railway auto-detects the `Dockerfile`.
+2. Railway uses `railpack.json` for Node plus native runtime packages.
 3. Add these env vars (Service → Variables):
 
 | Variable | Value |
 | --- | --- |
-| `SUPABASE_URL` | `https://qltmbelnvxcjhtzjrjgy.supabase.co` |
+| `SUPABASE_URL` | `https://abzfjfcfigshlkwgwdpy.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | from Lovable Cloud → Backend → API keys |
 | `LOVABLE_API_KEY` | from Lovable Cloud → AI Gateway |
 | `OPENAI_API_KEY` | your OpenAI key (Whisper) |

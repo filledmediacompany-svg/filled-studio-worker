@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: filled-studio-worker
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: SUPABASE_URL
+        value: https://abzfjfcfigshlkwgwdpy.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: LOVABLE_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: POLL_INTERVAL_MS
+        value: "5000"
+      - key: STALE_PROJECT_MINUTES
+        value: "30"

@@ -23,7 +23,8 @@ export async function downloadYouTube(url: string, outDir: string): Promise<stri
 }
 
 export async function downloadFromSupabase(supabaseUrl: string, serviceKey: string, bucket: string, key: string, outDir: string): Promise<string> {
-  const r = await fetch(`${supabaseUrl}/storage/v1/object/${bucket}/${encodeURIComponent(key)}`, {
+  const encodedKey = key.split("/").map(encodeURIComponent).join("/");
+  const r = await fetch(`${supabaseUrl}/storage/v1/object/${bucket}/${encodedKey}`, {
     headers: { Authorization: `Bearer ${serviceKey}` },
   });
   if (!r.ok) throw new Error(`Storage download failed ${r.status}`);
