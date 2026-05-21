@@ -128,9 +128,9 @@ export async function renderClip(opts: {
       ].join(";"),
       "-map", "[v]",
       "-map", "1:a:0",
+      "-t", String(duration),
       "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
       "-c:a", "aac", "-b:a", "128k",
-      "-shortest",
       "-movflags", "+faststart",
       outPath,
     ], { stdio: "inherit", timeout: Math.max(120000, duration * 10000), forceKillAfterDelay: 5000 });
