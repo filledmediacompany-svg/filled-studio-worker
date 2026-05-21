@@ -109,15 +109,14 @@ export async function renderClip(opts: {
 
     await execa("ffmpeg", [
       "-y",
-      "-f", "lavfi",
-      "-t", String(duration),
-      "-i", "color=c=#0a0a0a:s=720x1280:r=24",
       "-ss", String(start),
       "-t", String(duration),
       "-i", source,
+      "-f", "lavfi",
+      "-i", "color=c=#0a0a0a:s=720x1280:r=24",
       "-filter_complex",
       [
-        "[0:v]drawbox=x=0:y=0:w=720:h=1280:color=0x16120D@0.35:t=fill[base]",
+        "[1:v]drawbox=x=0:y=0:w=720:h=1280:color=0x16120D@0.35:t=fill[base]",
         "[base]drawbox=x=48:y=62:w=126:h=4:color=0xD7B56D@0.95:t=fill[accent]",
         "[accent]drawtext=text='FILLED STUDIO':fontcolor=0xD7B56D:fontsize=22:x=48:y=82[brand]",
         "[brand]drawbox=x=100:y=520:w=520:h=6:color=0xD7B56D@0.95:t=fill[bar1]",
@@ -127,10 +126,10 @@ export async function renderClip(opts: {
         `[${textOutput}]drawtext=text='AUDIO SOURCE':fontcolor=0xB8B8B8:fontsize=18:x=48:y=1185[v]`,
       ].join(";"),
       "-map", "[v]",
-      "-map", "1:a:0",
-      "-t", String(duration),
+      "-map", "0:a:0",
       "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
       "-c:a", "aac", "-b:a", "128k",
+      "-shortest",
       "-movflags", "+faststart",
       outPath,
     ], { stdio: "inherit", timeout: Math.max(120000, duration * 10000), forceKillAfterDelay: 5000 });
