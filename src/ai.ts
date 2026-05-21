@@ -3,6 +3,7 @@ import fetch from "node-fetch";
 const LOVABLE_API_KEY = process.env.LOVABLE_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const CLIP_DETECTION_MODEL = process.env.CLIP_DETECTION_MODEL ?? "gpt-4o-mini";
+const CLIP_DETECTION_PROVIDER = process.env.CLIP_DETECTION_PROVIDER ?? "local";
 
 export type DetectedClip = {
   title: string;
@@ -20,7 +21,9 @@ export async function detectClips(transcriptText: string, duration: number): Pro
     "You are an expert short-form video editor. Given a podcast transcript, identify the 5 most viral 30-90 second moments. Score by hook strength, retention, emotional payoff, and shareability. Return JSON only.";
   const user = `Transcript (duration ${duration}s):\n${transcriptText}\n\nReturn JSON: { "clips": [{ "title": string, "hook": string, "start_seconds": number, "end_seconds": number, "virality_score": number, "hook_score": number, "retention_score": number, "transcript_excerpt": string }] }`;
 
-  if (!LOVABLE_API_KEY && !OPENAI_API_KEY) return detectClipsLocally(transcriptText, duration);
+  if (!LOVABLE_API_KEY && CLIP_DETECTION_PROVIDER !== "openai") {
+    return detectClipsLocally(transcriptText, duration);
+  }
 
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
