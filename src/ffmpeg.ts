@@ -99,9 +99,9 @@ export async function renderClip(opts: {
     const titleLines = wrapText(title, 22, 3);
     const subtitleLines = wrapText(subtitle ?? "", 34, 2);
     const textFilters = [
-      "[0:v]drawbox=x=70:y=1180:w=940:h=370:color=black@0.48:t=fill[panel]",
-      ...drawTextLines("panel", titleLines, "title", 120, 1245, 58, "white", 72),
-      ...drawTextLines(`title${Math.max(titleLines.length - 1, 0)}`, subtitleLines, "sub", 120, 1490, 34, "0xE8D9A7", 48),
+      "[0:v]drawbox=x=48:y=785:w=624:h=260:color=black@0.48:t=fill[panel]",
+      ...drawTextLines("panel", titleLines, "title", 80, 835, 40, "white", 50),
+      ...drawTextLines(`title${Math.max(titleLines.length - 1, 0)}`, subtitleLines, "sub", 80, 995, 24, "0xE8D9A7", 34),
     ];
     const textOutput = subtitleLines.length > 0
       ? `sub${subtitleLines.length - 1}`
@@ -111,24 +111,24 @@ export async function renderClip(opts: {
       "-y",
       "-f", "lavfi",
       "-t", String(duration),
-      "-i", "color=c=#0a0a0a:s=1080x1920:r=30",
+      "-i", "color=c=#0a0a0a:s=720x1280:r=24",
       "-ss", String(start),
       "-t", String(duration),
       "-i", source,
       "-filter_complex",
       [
-        "[0:v]drawbox=x=0:y=0:w=1080:h=1920:color=0x16120D@0.35:t=fill[base]",
-        "[base]drawbox=x=70:y=92:w=190:h=5:color=0xD7B56D@0.95:t=fill[accent]",
-        "[accent]drawtext=text='FILLED STUDIO':fontcolor=0xD7B56D:fontsize=30:x=70:y=120[brand]",
-        "[brand]drawbox=x=150:y=780:w=780:h=8:color=0xD7B56D@0.95:t=fill[bar1]",
-        "[bar1]drawbox=x=210:y=820:w=660:h=8:color=0xD7B56D@0.55:t=fill[bar2]",
-        "[bar2]drawbox=x=290:y=860:w=500:h=8:color=0xD7B56D@0.35:t=fill[audioMark]",
+        "[0:v]drawbox=x=0:y=0:w=720:h=1280:color=0x16120D@0.35:t=fill[base]",
+        "[base]drawbox=x=48:y=62:w=126:h=4:color=0xD7B56D@0.95:t=fill[accent]",
+        "[accent]drawtext=text='FILLED STUDIO':fontcolor=0xD7B56D:fontsize=22:x=48:y=82[brand]",
+        "[brand]drawbox=x=100:y=520:w=520:h=6:color=0xD7B56D@0.95:t=fill[bar1]",
+        "[bar1]drawbox=x=140:y=548:w=440:h=6:color=0xD7B56D@0.55:t=fill[bar2]",
+        "[bar2]drawbox=x=194:y=576:w=332:h=6:color=0xD7B56D@0.35:t=fill[audioMark]",
         ...textFilters.map((filter, index) => index === 0 ? filter.replace("[0:v]", "[audioMark]") : filter),
-        `[${textOutput}]drawtext=text='AUDIO SOURCE':fontcolor=0xB8B8B8:fontsize=26:x=70:y=1780[v]`,
+        `[${textOutput}]drawtext=text='AUDIO SOURCE':fontcolor=0xB8B8B8:fontsize=18:x=48:y=1185[v]`,
       ].join(";"),
       "-map", "[v]",
       "-map", "1:a:0",
-      "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
       "-c:a", "aac", "-b:a", "128k",
       "-shortest",
       "-movflags", "+faststart",
