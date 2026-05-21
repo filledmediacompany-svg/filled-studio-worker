@@ -9,17 +9,51 @@ export async function tmpDir(prefix = "fs-"): Promise<string> {
 
 export async function downloadYouTube(url: string, outDir: string): Promise<string> {
   const out = path.join(outDir, "source.%(ext)s");
-  await execa("yt-dlp", [
-    "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+  const commonArgs = [
+    "--no-playlist",
+    "--retries", "3",
+    "--fragment-retries", "3",
     "--merge-output-format", "mp4",
     "-o", out,
-    url,
-  ], { stdio: "inherit" });
+  ];
+
+  try {
+    await execa("yt-dlp", [
+      "-f", "bv*[height<=1080]+ba/b[height<=1080]/best",
+      ...commonArgs,
+      url,
+    ], { stderr: "pipe", stdout: "pipe" });
+  } catch (primaryError) {
+    try {
+      await execa("yt-dlp", [
+        "-f", "best",
+        ...commonArgs,
+        url,
+      ], { stderr: "pipe", stdout: "pipe" });
+    } catch (fallbackError) {
+      const message = formatDownloadError(fallbackError, primaryError);
+      throw new Error(`YouTube download failed: ${message}`);
+    }
+  }
+
   // Find the file
   const files = await fs.readdir(outDir);
   const src = files.find((f) => f.startsWith("source."));
   if (!src) throw new Error("yt-dlp produced no file");
   return path.join(outDir, src);
+}
+
+function formatDownloadError(error: unknown, primaryError?: unknown): string {
+  const stderr = [error, primaryError]
+    .map((value) => {
+      if (!value || typeof value !== "object") return "";
+      const maybe = value as { stderr?: string; shortMessage?: string; message?: string };
+      return maybe.stderr || maybe.shortMessage || maybe.message || "";
+    })
+    .filter(Boolean)
+    .join("\n");
+
+  return stderr.split("\n").slice(-8).join("\n").trim() || "yt-dlp exited without details";
 }
 
 export async function downloadFromSupabase(supabaseUrl: string, serviceKey: string, bucket: string, key: string, outDir: string): Promise<string> {
