@@ -94,6 +94,28 @@ export async function renderClip(opts: {
   const duration = end - start;
   // Title escape for drawtext
   const safe = title.replace(/['"\\':\%]/g, " ").slice(0, 80);
+  const hasVideo = await sourceHasVideo(source);
+  if (!hasVideo) {
+    await execa("ffmpeg", [
+      "-y",
+      "-ss", String(start),
+      "-t", String(duration),
+      "-i", source,
+      "-f", "lavfi",
+      "-i", "color=c=#0a0a0a:s=1080x1920:r=30",
+      "-filter_complex",
+      `[1:v]drawtext=text='${safe}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.6:boxborderw=20:x=(w-text_w)/2:y=(h-text_h)/2[v]`,
+      "-map", "[v]",
+      "-map", "0:a",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+      "-c:a", "aac", "-b:a", "128k",
+      "-shortest",
+      "-movflags", "+faststart",
+      outPath,
+    ], { stdio: "inherit" });
+    return;
+  }
+
   const filter = [
     `[0:v]trim=start=${start}:duration=${duration},setpts=PTS-STARTPTS,`,
     `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,`,
@@ -113,4 +135,15 @@ export async function renderClip(opts: {
     "-movflags", "+faststart",
     outPath,
   ], { stdio: "inherit" });
+}
+
+async function sourceHasVideo(source: string): Promise<boolean> {
+  const { stdout } = await execa("ffprobe", [
+    "-v", "error",
+    "-select_streams", "v:0",
+    "-show_entries", "stream=codec_type",
+    "-of", "csv=p=0",
+    source,
+  ]);
+  return stdout.trim() === "video";
 }
