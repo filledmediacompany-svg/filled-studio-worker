@@ -136,25 +136,24 @@ export async function renderClip(opts: {
     return;
   }
 
-  const filter = [
-    `[0:v]trim=start=${start}:duration=${duration},setpts=PTS-STARTPTS,`,
-    `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,`,
-    `drawtext=text='${safe}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.6:boxborderw=20:x=(w-text_w)/2:y=h-360`,
-    `[v]`,
-  ].join("");
   await execa("ffmpeg", [
     "-y",
-    "-i", source,
-    "-filter_complex", filter,
-    "-map", "[v]",
-    "-map", `0:a`,
     "-ss", String(start),
     "-t", String(duration),
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+    "-i", source,
+    "-vf",
+    [
+      "scale=720:1280:force_original_aspect_ratio=increase",
+      "crop=720:1280",
+      `drawtext=text='${safe}':fontcolor=white:fontsize=42:box=1:boxcolor=black@0.55:boxborderw=14:x=(w-text_w)/2:y=h-245`,
+    ].join(","),
+    "-map", "0:v:0",
+    "-map", "0:a:0?",
+    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
     "-c:a", "aac", "-b:a", "128k",
     "-movflags", "+faststart",
     outPath,
-  ], { stdio: "inherit" });
+  ], { stdio: "inherit", timeout: Math.max(120000, duration * 10000), forceKillAfterDelay: 5000 });
 }
 
 function escapeDrawText(value: string): string {
