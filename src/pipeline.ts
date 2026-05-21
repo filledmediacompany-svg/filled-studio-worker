@@ -58,9 +58,13 @@ export async function processProject(project: Project): Promise<void> {
     if (insErr) throw insErr;
     await persistClipStudioFields(insertedClips ?? [], detected);
     await setStatus(project.id, "ready");
+    const detectedByClipId = new Map(
+      (insertedClips ?? []).map((clip, index) => [clip.id, detected[index]]),
+    );
 
     // 5. Render each clip (sequential to keep memory low)
     for (const clip of insertedClips ?? []) {
+      const sourceClip = detectedByClipId.get(clip.id);
       const outPath = path.join(work, `clip-${clip.id}.mp4`);
       try {
         await createRenderJob(clip.id, project.id, project.user_id, "running");
@@ -70,6 +74,7 @@ export async function processProject(project: Project): Promise<void> {
           end: Number(clip.end_seconds),
           outPath,
           title: clip.title,
+          subtitle: sourceClip?.transcript_excerpt || sourceClip?.hook,
         });
         // Upload
         const buf = await fs.readFile(outPath);

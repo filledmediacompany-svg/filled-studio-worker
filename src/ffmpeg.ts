@@ -89,13 +89,24 @@ export async function renderClip(opts: {
   end: number;
   outPath: string;
   title: string;
+  subtitle?: string;
 }): Promise<void> {
-  const { source, start, end, outPath, title } = opts;
+  const { source, start, end, outPath, title, subtitle } = opts;
   const duration = end - start;
-  // Title escape for drawtext
-  const safe = title.replace(/['"\\':\%]/g, " ").slice(0, 80);
+  const safe = escapeDrawText(title).slice(0, 80);
   const hasVideo = await sourceHasVideo(source);
   if (!hasVideo) {
+    const titleLines = wrapText(title, 22, 3);
+    const subtitleLines = wrapText(subtitle ?? "", 34, 2);
+    const textFilters = [
+      "[0:v]drawbox=x=70:y=1180:w=940:h=370:color=black@0.48:t=fill[panel]",
+      ...drawTextLines("panel", titleLines, "title", 120, 1245, 58, "white", 72),
+      ...drawTextLines(`title${Math.max(titleLines.length - 1, 0)}`, subtitleLines, "sub", 120, 1490, 34, "0xE8D9A7", 48),
+    ];
+    const textOutput = subtitleLines.length > 0
+      ? `sub${subtitleLines.length - 1}`
+      : `title${Math.max(titleLines.length - 1, 0)}`;
+
     await execa("ffmpeg", [
       "-y",
       "-f", "lavfi",
@@ -105,7 +116,15 @@ export async function renderClip(opts: {
       "-t", String(duration),
       "-i", source,
       "-filter_complex",
-      `[0:v]drawtext=text='${safe}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.6:boxborderw=20:x=(w-text_w)/2:y=(h-text_h)/2[v]`,
+      [
+        "[0:v]drawbox=x=0:y=0:w=1080:h=1920:color=0x16120D@0.35:t=fill[base]",
+        "[base]drawbox=x=70:y=92:w=190:h=5:color=0xD7B56D@0.95:t=fill[accent]",
+        "[accent]drawtext=text='FILLED STUDIO':fontcolor=0xD7B56D:fontsize=30:x=70:y=120:letter_spacing=2[brand]",
+        "[1:a]showwaves=s=900x260:mode=line:colors=0xD7B56D@0.95,format=rgba[wave]",
+        "[brand][wave]overlay=x=(W-w)/2:y=815[wavebg]",
+        ...textFilters.map((filter, index) => index === 0 ? filter.replace("[0:v]", "[wavebg]") : filter),
+        `[${textOutput}]drawtext=text='AUDIO SOURCE':fontcolor=0xB8B8B8:fontsize=26:x=70:y=1780:letter_spacing=2[v]`,
+      ].join(";"),
       "-map", "[v]",
       "-map", "1:a:0",
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
@@ -136,6 +155,53 @@ export async function renderClip(opts: {
     "-movflags", "+faststart",
     outPath,
   ], { stdio: "inherit" });
+}
+
+function escapeDrawText(value: string): string {
+  return value
+    .replace(/[\r\n]+/g, " ")
+    .replace(/['"\\:%]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function wrapText(value: string, maxChars: number, maxLines: number): string[] {
+  const words = escapeDrawText(value).split(" ").filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length > maxChars && current) {
+      lines.push(current);
+      current = word;
+      if (lines.length === maxLines) break;
+    } else {
+      current = next;
+    }
+  }
+
+  if (current && lines.length < maxLines) lines.push(current);
+  return lines;
+}
+
+function drawTextLines(
+  inputLabel: string,
+  lines: string[],
+  outputPrefix: string,
+  x: number,
+  y: number,
+  fontSize: number,
+  color: string,
+  lineHeight: number,
+): string[] {
+  if (lines.length === 0) return [];
+
+  return lines.map((line, index) => {
+    const from = index === 0 ? inputLabel : `${outputPrefix}${index - 1}`;
+    const to = `${outputPrefix}${index}`;
+    return `[${from}]drawtext=text='${escapeDrawText(line)}':fontcolor=${color}:fontsize=${fontSize}:x=${x}:y=${y + index * lineHeight}[${to}]`;
+  });
 }
 
 async function sourceHasVideo(source: string): Promise<boolean> {
