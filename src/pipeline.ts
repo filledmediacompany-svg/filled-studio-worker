@@ -57,6 +57,7 @@ export async function processProject(project: Project): Promise<void> {
     const { data: insertedClips, error: insErr } = await supabase.from("clips").insert(clipRows).select();
     if (insErr) throw insErr;
     await persistClipStudioFields(insertedClips ?? [], detected);
+    await setStatus(project.id, "ready");
 
     // 5. Render each clip (sequential to keep memory low)
     for (const clip of insertedClips ?? []) {

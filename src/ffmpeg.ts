@@ -98,21 +98,22 @@ export async function renderClip(opts: {
   if (!hasVideo) {
     await execa("ffmpeg", [
       "-y",
+      "-f", "lavfi",
+      "-t", String(duration),
+      "-i", "color=c=#0a0a0a:s=1080x1920:r=30",
       "-ss", String(start),
       "-t", String(duration),
       "-i", source,
-      "-f", "lavfi",
-      "-i", "color=c=#0a0a0a:s=1080x1920:r=30",
       "-filter_complex",
-      `[1:v]drawtext=text='${safe}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.6:boxborderw=20:x=(w-text_w)/2:y=(h-text_h)/2[v]`,
+      `[0:v]drawtext=text='${safe}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.6:boxborderw=20:x=(w-text_w)/2:y=(h-text_h)/2[v]`,
       "-map", "[v]",
-      "-map", "0:a",
+      "-map", "1:a:0",
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
       "-c:a", "aac", "-b:a", "128k",
       "-shortest",
       "-movflags", "+faststart",
       outPath,
-    ], { stdio: "inherit" });
+    ], { stdio: "inherit", timeout: Math.max(120000, duration * 10000), forceKillAfterDelay: 5000 });
     return;
   }
 
