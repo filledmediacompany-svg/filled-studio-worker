@@ -1,6 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { supabase, type Project, setStatus, setError } from "./supabase.js";
+import { supabase, type Project, type RenderJob, setStatus, setError } from "./supabase.js";
 import { tmpDir, downloadYouTube, downloadFromSupabase, extractAudio, getDuration, renderClip } from "./ffmpeg.js";
 import { transcribe } from "./transcribe.js";
 import { detectClips, type DetectedClip } from "./ai.js";
@@ -109,6 +109,86 @@ export async function processProject(project: Project): Promise<void> {
   }
 }
 
+export async function processRenderJob(job: RenderJob): Promise<void> {
+  const work = await tmpDir(`render-${job.id}-`);
+  console.log(`[render job ${job.id}] start`);
+
+  try {
+    const { data: clip, error: clipError } = await supabase
+      .from("clips")
+      .select("*")
+      .eq("id", job.clip_id)
+      .single();
+    if (clipError || !clip) throw clipError ?? new Error("Clip not found");
+
+    if (clip.output_url) {
+      await finishRenderJobById(job.id, "completed", clip.output_url);
+      await supabase
+        .from("render_jobs")
+        .update({ status: "completed", progress: 100, output_url: clip.output_url, completed_at: new Date().toISOString() })
+        .eq("clip_id", job.clip_id)
+        .eq("status", "queued");
+      return;
+    }
+
+    const { data: project, error: projectError } = await supabase
+      .from("projects")
+      .select("*")
+      .eq("id", clip.project_id)
+      .single();
+    if (projectError || !project) throw projectError ?? new Error("Project not found");
+
+    let srcPath: string;
+    if (project.source_type === "youtube") {
+      if (!project.source_url) throw new Error("missing source_url");
+      srcPath = await downloadYouTube(project.source_url, work);
+    } else {
+      if (!project.source_storage_key) throw new Error("missing source_storage_key");
+      srcPath = await downloadFromSupabase(SUPABASE_URL, SERVICE_KEY, "uploads", project.source_storage_key, work);
+    }
+
+    await updateRenderJob(job.id, { progress: 35 });
+    const outPath = path.join(work, `clip-${clip.id}.mp4`);
+    await renderClip({
+      source: srcPath,
+      start: Number(clip.start_seconds),
+      end: Number(clip.end_seconds),
+      outPath,
+      title: clip.title,
+      subtitle: clip.transcript_excerpt || clip.hook,
+    });
+
+    await updateRenderJob(job.id, { progress: 75 });
+    const buf = await fs.readFile(outPath);
+    const key = `${project.user_id}/${project.id}/${clip.id}.mp4`;
+    const { error: uploadError } = await supabase.storage.from("renders").upload(key, buf, {
+      contentType: "video/mp4",
+      upsert: true,
+    });
+    if (uploadError) throw uploadError;
+
+    const { data: pub } = supabase.storage.from("renders").getPublicUrl(key);
+    await supabase
+      .from("clips")
+      .update({ status: "rendered", output_url: pub.publicUrl })
+      .eq("id", clip.id);
+    await finishRenderJobById(job.id, "completed", pub.publicUrl);
+    await supabase
+      .from("render_jobs")
+      .update({ status: "completed", progress: 100, output_url: pub.publicUrl, completed_at: new Date().toISOString() })
+      .eq("clip_id", clip.id)
+      .eq("status", "queued");
+    console.log(`[render job ${job.id}] completed clip ${clip.id}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[render job ${job.id}] failed`, error);
+    await supabase.from("clips").update({ status: "failed" }).eq("id", job.clip_id);
+    await finishRenderJobById(job.id, "failed", null, message);
+  } finally {
+    fs.rm(work, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function persistTranscriptWords(
   project: Project,
   words: Array<{ word: string; start: number; end: number }>,
@@ -187,4 +267,24 @@ async function finishRenderJob(
   if (error) {
     console.warn(`[clip ${clipId}] render_jobs update skipped: ${error.message}`);
   }
+}
+
+async function updateRenderJob(jobId: string, fields: Record<string, unknown>): Promise<void> {
+  const { error } = await supabase.from("render_jobs").update(fields).eq("id", jobId);
+  if (error) console.warn(`[render job ${jobId}] update skipped: ${error.message}`);
+}
+
+async function finishRenderJobById(
+  jobId: string,
+  status: string,
+  outputUrl: string | null,
+  errorMessage?: string,
+): Promise<void> {
+  await updateRenderJob(jobId, {
+    status,
+    progress: status === "completed" ? 100 : 0,
+    output_url: outputUrl,
+    error_message: errorMessage?.slice(0, 500) ?? null,
+    completed_at: new Date().toISOString(),
+  });
 }

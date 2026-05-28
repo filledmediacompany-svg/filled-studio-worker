@@ -35,6 +35,13 @@ export type Project = {
   duration_seconds: number | null;
 };
 
+export type RenderJob = {
+  id: string;
+  clip_id: string;
+  user_id: string;
+  status: string;
+};
+
 export async function claimNextProject(): Promise<Project | null> {
   if (!isSupabaseConfigured) return null;
 
@@ -65,6 +72,39 @@ export async function claimNextProject(): Promise<Project | null> {
   }
   console.log(`[${id}] claimed queued project`);
   return data as Project;
+}
+
+export async function claimNextRenderJob(): Promise<RenderJob | null> {
+  if (!isSupabaseConfigured) return null;
+
+  const { data: queued, error: listError } = await supabase
+    .from("render_jobs")
+    .select("id")
+    .eq("status", "queued")
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (listError) {
+    console.error("Failed to list queued render jobs", listError);
+    return null;
+  }
+  if (!queued || queued.length === 0) return null;
+
+  const id = queued[0].id;
+  const { data, error } = await supabase
+    .from("render_jobs")
+    .update({ status: "running", progress: 5, error_message: null })
+    .eq("id", id)
+    .eq("status", "queued")
+    .select("id, clip_id, user_id, status")
+    .single();
+  if (error || !data) {
+    console.error("Failed to claim queued render job", { id, error });
+    return null;
+  }
+
+  await supabase.from("clips").update({ status: "rendering" }).eq("id", data.clip_id);
+  console.log(`[render job ${id}] claimed clip ${data.clip_id}`);
+  return data as RenderJob;
 }
 
 export async function requeueStaleProjects(maxAgeMinutes = 30): Promise<number> {

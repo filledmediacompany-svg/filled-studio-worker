@@ -1,6 +1,6 @@
 import { createServer } from "http";
-import { claimNextProject, isSupabaseConfigured, missingSupabaseEnv, requeueStaleProjects } from "./supabase.js";
-import { processProject } from "./pipeline.js";
+import { claimNextProject, claimNextRenderJob, isSupabaseConfigured, missingSupabaseEnv, requeueStaleProjects } from "./supabase.js";
+import { processProject, processRenderJob } from "./pipeline.js";
 
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5000);
 const PORT = Number(process.env.PORT ?? 3000);
@@ -10,6 +10,7 @@ const STUDIO_APP_URL = process.env.STUDIO_APP_URL ?? "https://filled-studio-app.
 type WorkerState = {
   configured: boolean;
   currentProjectId: string | null;
+  currentRenderJobId: string | null;
   lastError: string | null;
   lastPollAt: string | null;
   lastProjectClaimedAt: string | null;
@@ -21,6 +22,7 @@ type WorkerState = {
 const state: WorkerState = {
   configured: isSupabaseConfigured,
   currentProjectId: null,
+  currentRenderJobId: null,
   lastError: null,
   lastPollAt: null,
   lastProjectClaimedAt: null,
@@ -100,12 +102,20 @@ async function loop() {
           state.lastProjectClaimedAt = new Date().toISOString();
           await processProject(project);
           state.currentProjectId = null;
+        } else {
+          const renderJob = await claimNextRenderJob();
+          if (renderJob) {
+            state.currentRenderJobId = renderJob.id;
+            await processRenderJob(renderJob);
+            state.currentRenderJobId = null;
+          }
         }
       } catch (e) {
         state.lastError = e instanceof Error ? e.message : String(e);
         console.error("loop error", e);
       } finally {
         if (state.currentProjectId) state.currentProjectId = null;
+        if (state.currentRenderJobId) state.currentRenderJobId = null;
         processing = false;
       }
     }
