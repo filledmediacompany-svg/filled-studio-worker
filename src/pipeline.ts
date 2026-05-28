@@ -93,6 +93,7 @@ export async function processProject(project: Project): Promise<void> {
         const key = `${project.user_id}/${project.id}/${clip.id}.mp4`;
         const { error: upErr } = await supabase.storage.from("renders").upload(key, buf, {
           contentType: "video/mp4",
+          cacheControl: "60",
           upsert: true,
         });
         if (upErr) throw upErr;
@@ -174,9 +175,10 @@ export async function processRenderJob(job: RenderJob): Promise<void> {
 
     await updateRenderJob(job.id, { progress: 75 });
     const buf = await fs.readFile(outPath);
-    const key = `${project.user_id}/${project.id}/${clip.id}.mp4`;
+    const key = `${project.user_id}/${project.id}/${clip.id}-${job.id}.mp4`;
     const { error: uploadError } = await supabase.storage.from("renders").upload(key, buf, {
       contentType: "video/mp4",
+      cacheControl: "60",
       upsert: true,
     });
     if (uploadError) throw uploadError;
