@@ -75,6 +75,7 @@ export async function processProject(project: Project): Promise<void> {
           outPath,
           title: clip.title,
           subtitle: sourceClip?.transcript_excerpt || sourceClip?.hook,
+          recipe: clip.controls?.edit_recipe ?? null,
         });
         // Upload
         const buf = await fs.readFile(outPath);
@@ -121,16 +122,6 @@ export async function processRenderJob(job: RenderJob): Promise<void> {
       .single();
     if (clipError || !clip) throw clipError ?? new Error("Clip not found");
 
-    if (clip.output_url) {
-      await finishRenderJobById(job.id, "completed", clip.output_url);
-      await supabase
-        .from("render_jobs")
-        .update({ status: "completed", progress: 100, output_url: clip.output_url, completed_at: new Date().toISOString() })
-        .eq("clip_id", job.clip_id)
-        .eq("status", "queued");
-      return;
-    }
-
     const { data: project, error: projectError } = await supabase
       .from("projects")
       .select("*")
@@ -156,6 +147,7 @@ export async function processRenderJob(job: RenderJob): Promise<void> {
       outPath,
       title: clip.title,
       subtitle: clip.transcript_excerpt || clip.hook,
+      recipe: clip.controls?.edit_recipe ?? null,
     });
 
     await updateRenderJob(job.id, { progress: 75 });

@@ -90,10 +90,12 @@ export async function renderClip(opts: {
   outPath: string;
   title: string;
   subtitle?: string;
+  recipe?: Record<string, any> | null;
 }): Promise<void> {
-  const { source, start, end, outPath, title, subtitle } = opts;
+  const { source, start, end, outPath, title, subtitle, recipe } = opts;
   const duration = end - start;
-  const safe = escapeDrawText(title).slice(0, 80);
+  const recipePreset = typeof recipe?.presetId === "string" ? recipe.presetId : "basic";
+  const intensity = Number(recipe?.intensity ?? 45);
   const hasVideo = await sourceHasVideo(source);
   if (!hasVideo) {
     const titleLines = wrapText(title, 22, 3);
@@ -136,17 +138,25 @@ export async function renderClip(opts: {
     return;
   }
 
+  const caption = escapeDrawText(subtitle || title).slice(0, 110);
+  const captionLines = wrapText(caption, recipePreset === "bryce_punchy" ? 18 : 24, 2);
+  const motionStrength = Math.max(0.015, Math.min(0.09, intensity / 1100));
+  const baseFilters = [
+    "scale=720:1280:force_original_aspect_ratio=increase",
+    "crop=720:1280",
+    `scale=w='720*(1+${motionStrength.toFixed(3)}*sin(2*PI*t/2.2))':h='1280*(1+${motionStrength.toFixed(3)}*sin(2*PI*t/2.2))':eval=frame`,
+    "crop=720:1280",
+    "eq=contrast=1.04:saturation=1.06",
+  ];
+  const captionFilters = drawBurnedCaptionFilters(captionLines, recipePreset, intensity);
+
   await execa("ffmpeg", [
     "-y",
     "-ss", String(start),
     "-t", String(duration),
     "-i", source,
     "-vf",
-    [
-      "scale=720:1280:force_original_aspect_ratio=increase",
-      "crop=720:1280",
-      `drawtext=text='${safe}':fontcolor=white:fontsize=42:box=1:boxcolor=black@0.55:boxborderw=14:x=(w-text_w)/2:y=h-245`,
-    ].join(","),
+    [...baseFilters, ...captionFilters].join(","),
     "-map", "0:v:0",
     "-map", "0:a:0?",
     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
@@ -154,6 +164,31 @@ export async function renderClip(opts: {
     "-movflags", "+faststart",
     outPath,
   ], { stdio: "inherit", timeout: Math.max(120000, duration * 10000), forceKillAfterDelay: 5000 });
+}
+
+function drawBurnedCaptionFilters(lines: string[], presetId: string, intensity: number): string[] {
+  const fontSize = presetId === "doac_clean" ? 38 : presetId === "bryce_punchy" ? 48 : 43;
+  const yBase = presetId === "doac_clean" ? "h-265" : "h-300";
+  const color = presetId === "bryce_punchy" ? "0xF2C84B" : "white";
+  const border = presetId === "doac_clean" ? 3 : Math.max(4, Math.min(8, Math.round(intensity / 13)));
+  const safeLines = lines.length > 0 ? lines : [" "];
+
+  return safeLines.map((line, index) => {
+    const y = `${yBase}+${index * (fontSize + 8)}`;
+    return [
+      "drawtext=",
+      `text='${escapeDrawText(line)}'`,
+      `fontcolor=${index === 0 ? color : "white"}`,
+      `fontsize=${fontSize}`,
+      `borderw=${border}`,
+      "bordercolor=black@0.92",
+      "shadowcolor=black@0.85",
+      "shadowx=3",
+      "shadowy=3",
+      "x=(w-text_w)/2",
+      `y=${y}`,
+    ].join(":");
+  });
 }
 
 function escapeDrawText(value: string): string {
