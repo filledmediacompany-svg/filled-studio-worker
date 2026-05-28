@@ -4,6 +4,7 @@ import { supabase, type Project, type RenderJob, setStatus, setError } from "./s
 import { tmpDir, downloadYouTube, downloadFromSupabase, extractAudio, getDuration, renderClip } from "./ffmpeg.js";
 import { transcribe } from "./transcribe.js";
 import { detectClips, type DetectedClip } from "./ai.js";
+import { prepareBrollAssets } from "./broll.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -68,6 +69,15 @@ export async function processProject(project: Project): Promise<void> {
       const outPath = path.join(work, `clip-${clip.id}.mp4`);
       try {
         await createRenderJob(clip.id, project.id, project.user_id, "running");
+        const recipe = clip.controls?.edit_recipe ?? null;
+        const brollAssets = await prepareBrollAssets({
+          recipe,
+          clipId: clip.id,
+          userId: project.user_id,
+          clipStart: Number(clip.start_seconds),
+          clipEnd: Number(clip.end_seconds),
+          workDir: work,
+        });
         await renderClip({
           source: srcPath,
           start: Number(clip.start_seconds),
@@ -75,7 +85,8 @@ export async function processProject(project: Project): Promise<void> {
           outPath,
           title: clip.title,
           subtitle: sourceClip?.transcript_excerpt || sourceClip?.hook,
-          recipe: clip.controls?.edit_recipe ?? null,
+          recipe,
+          brollAssets,
         });
         // Upload
         const buf = await fs.readFile(outPath);
@@ -138,8 +149,18 @@ export async function processRenderJob(job: RenderJob): Promise<void> {
       srcPath = await downloadFromSupabase(SUPABASE_URL, SERVICE_KEY, "uploads", project.source_storage_key, work);
     }
 
-    await updateRenderJob(job.id, { progress: 35 });
+    await updateRenderJob(job.id, { progress: 30 });
     const outPath = path.join(work, `clip-${clip.id}.mp4`);
+    const recipe = clip.controls?.edit_recipe ?? null;
+    const brollAssets = await prepareBrollAssets({
+      recipe,
+      clipId: clip.id,
+      userId: project.user_id,
+      clipStart: Number(clip.start_seconds),
+      clipEnd: Number(clip.end_seconds),
+      workDir: work,
+    });
+    await updateRenderJob(job.id, { progress: brollAssets.length > 0 ? 45 : 35 });
     await renderClip({
       source: srcPath,
       start: Number(clip.start_seconds),
@@ -147,7 +168,8 @@ export async function processRenderJob(job: RenderJob): Promise<void> {
       outPath,
       title: clip.title,
       subtitle: clip.transcript_excerpt || clip.hook,
-      recipe: clip.controls?.edit_recipe ?? null,
+      recipe,
+      brollAssets,
     });
 
     await updateRenderJob(job.id, { progress: 75 });

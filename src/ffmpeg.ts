@@ -2,6 +2,7 @@ import { execa } from "execa";
 import { promises as fs } from "fs";
 import path from "path";
 import os from "os";
+import type { BrollAsset } from "./broll.js";
 
 export async function tmpDir(prefix = "fs-"): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -91,8 +92,9 @@ export async function renderClip(opts: {
   title: string;
   subtitle?: string;
   recipe?: Record<string, any> | null;
+  brollAssets?: BrollAsset[];
 }): Promise<void> {
-  const { source, start, end, outPath, title, subtitle, recipe } = opts;
+  const { source, start, end, outPath, title, subtitle, recipe, brollAssets = [] } = opts;
   const duration = end - start;
   const recipePreset = typeof recipe?.presetId === "string" ? recipe.presetId : "basic";
   const intensity = Number(recipe?.intensity ?? 45);
@@ -101,8 +103,7 @@ export async function renderClip(opts: {
     const titleLines = wrapText(title, 22, 3);
     const subtitleLines = wrapText(subtitle ?? "", 34, 2);
     const textFilters = [
-      "[0:v]drawbox=x=48:y=785:w=624:h=260:color=black@0.48:t=fill[panel]",
-      ...drawTextLines("panel", titleLines, "title", 80, 835, 40, "white", 50),
+      ...drawTextLines("audioMark", titleLines, "title", 80, 835, 40, "white", 50),
       ...drawTextLines(`title${Math.max(titleLines.length - 1, 0)}`, subtitleLines, "sub", 80, 995, 24, "0xE8D9A7", 34),
     ];
     const textOutput = subtitleLines.length > 0
@@ -124,7 +125,7 @@ export async function renderClip(opts: {
         "[brand]drawbox=x=100:y=520:w=520:h=6:color=0xD7B56D@0.95:t=fill[bar1]",
         "[bar1]drawbox=x=140:y=548:w=440:h=6:color=0xD7B56D@0.55:t=fill[bar2]",
         "[bar2]drawbox=x=194:y=576:w=332:h=6:color=0xD7B56D@0.35:t=fill[audioMark]",
-        ...textFilters.map((filter, index) => index === 0 ? filter.replace("[0:v]", "[audioMark]") : filter),
+        ...textFilters,
         `[${textOutput}]drawtext=text='AUDIO SOURCE':fontcolor=0xB8B8B8:fontsize=18:x=48:y=1185[v]`,
       ].join(";"),
       "-map", "[v]",
@@ -149,6 +150,31 @@ export async function renderClip(opts: {
     "eq=contrast=1.04:saturation=1.06",
   ];
   const captionFilters = drawBurnedCaptionFilters(captionLines, recipePreset, intensity);
+  const safeBroll = brollAssets
+    .filter((asset) => Number.isFinite(asset.start) && Number.isFinite(asset.end) && asset.end > asset.start)
+    .slice(0, 4);
+
+  if (safeBroll.length > 0) {
+    const inputs = safeBroll.flatMap((asset) => ["-stream_loop", "-1", "-i", asset.path]);
+    const filter = buildBrollFilterComplex(baseFilters, captionFilters, safeBroll);
+
+    await execa("ffmpeg", [
+      "-y",
+      "-ss", String(start),
+      "-t", String(duration),
+      "-i", source,
+      ...inputs,
+      "-filter_complex", filter,
+      "-map", "[v]",
+      "-map", "0:a:0?",
+      "-c:v", "libx264", "-preset", "ultrafast", "-crf", "25",
+      "-c:a", "aac", "-b:a", "128k",
+      "-shortest",
+      "-movflags", "+faststart",
+      outPath,
+    ], { stdio: "inherit", timeout: Math.max(120000, duration * 12000), forceKillAfterDelay: 5000 });
+    return;
+  }
 
   await execa("ffmpeg", [
     "-y",
@@ -164,6 +190,31 @@ export async function renderClip(opts: {
     "-movflags", "+faststart",
     outPath,
   ], { stdio: "inherit", timeout: Math.max(120000, duration * 10000), forceKillAfterDelay: 5000 });
+}
+
+function buildBrollFilterComplex(baseFilters: string[], captionFilters: string[], assets: BrollAsset[]): string {
+  const filters: string[] = [
+    `[0:v]${baseFilters.join(",")}[base0]`,
+  ];
+  let current = "base0";
+
+  assets.forEach((asset, index) => {
+    const input = index + 1;
+    const start = Math.max(0, asset.start);
+    const end = Math.max(start + 0.5, asset.end);
+    const duration = end - start;
+    const fadeOutStart = Math.max(start, end - 0.18);
+    const brollLabel = `broll${index}`;
+    const outLabel = `mix${index}`;
+    filters.push(
+      `[${input}:v]trim=duration=${duration.toFixed(3)},setpts=PTS-STARTPTS+${start.toFixed(3)}/TB,scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,eq=contrast=1.06:saturation=1.1,format=yuva420p,fade=t=in:st=${start.toFixed(3)}:d=0.12:alpha=1,fade=t=out:st=${fadeOutStart.toFixed(3)}:d=0.18:alpha=1[${brollLabel}]`,
+      `[${current}][${brollLabel}]overlay=0:0:eof_action=pass:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${outLabel}]`,
+    );
+    current = outLabel;
+  });
+
+  filters.push(`[${current}]${captionFilters.join(",")}[v]`);
+  return filters.join(";");
 }
 
 function drawBurnedCaptionFilters(lines: string[], presetId: string, intensity: number): string[] {
