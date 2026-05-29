@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { supabase, type Project, type RenderJob, setStatus, setError } from "./supabase.js";
-import { tmpDir, downloadYouTube, downloadFromSupabase, extractAudio, getDuration, renderClip } from "./ffmpeg.js";
+import { tmpDir, downloadYouTube, downloadFromSupabase, extractAudio, getDuration, renderClip, type CaptionWord } from "./ffmpeg.js";
 import { transcribe } from "./transcribe.js";
 import { detectClips, type DetectedClip } from "./ai.js";
 import { prepareBrollAssets } from "./broll.js";
@@ -87,6 +87,7 @@ export async function processProject(project: Project): Promise<void> {
           subtitle: sourceClip?.transcript_excerpt || sourceClip?.hook,
           recipe,
           brollAssets,
+          captionWords: getClipCaptionWords(transcript.words, Number(clip.start_seconds), Number(clip.end_seconds)),
         });
         // Upload
         const buf = await fs.readFile(outPath);
@@ -161,7 +162,12 @@ export async function processRenderJob(job: RenderJob): Promise<void> {
       clipEnd: Number(clip.end_seconds),
       workDir: work,
     });
+    console.log(`[render job ${job.id}] prepared ${brollAssets.length} b-roll asset(s)`);
+    if (brollAssets.length === 0) {
+      await updateRenderJob(job.id, { error_message: "No B-roll assets were fetched. Check PEXELS_API_KEY and Pexels search logs." });
+    }
     await updateRenderJob(job.id, { progress: brollAssets.length > 0 ? 45 : 35 });
+    const captionWords = await fetchClipCaptionWords(project.id, Number(clip.start_seconds), Number(clip.end_seconds));
     await renderClip({
       source: srcPath,
       start: Number(clip.start_seconds),
@@ -171,6 +177,7 @@ export async function processRenderJob(job: RenderJob): Promise<void> {
       subtitle: clip.transcript_excerpt || clip.hook,
       recipe,
       brollAssets,
+      captionWords,
     });
 
     await updateRenderJob(job.id, { progress: 75 });
@@ -283,6 +290,43 @@ async function finishRenderJob(
   if (error) {
     console.warn(`[clip ${clipId}] render_jobs update skipped: ${error.message}`);
   }
+}
+
+async function fetchClipCaptionWords(projectId: string, clipStart: number, clipEnd: number): Promise<CaptionWord[]> {
+  const { data, error } = await supabase
+    .from("transcript_words")
+    .select("word,start_seconds,end_seconds")
+    .eq("project_id", projectId)
+    .gte("end_seconds", clipStart)
+    .lte("start_seconds", clipEnd)
+    .order("position", { ascending: true })
+    .limit(900);
+  if (error) {
+    console.warn(`[${projectId}] transcript word lookup skipped: ${error.message}`);
+    return [];
+  }
+
+  return getClipCaptionWords(
+    (data ?? []).map((row: any) => ({
+      word: String(row.word ?? ""),
+      start: Number(row.start_seconds ?? 0),
+      end: Number(row.end_seconds ?? 0),
+    })),
+    clipStart,
+    clipEnd,
+  );
+}
+
+function getClipCaptionWords(words: CaptionWord[], clipStart: number, clipEnd: number): CaptionWord[] {
+  const duration = Math.max(0.1, clipEnd - clipStart);
+  return words
+    .filter((word) => word.end >= clipStart && word.start <= clipEnd)
+    .map((word) => ({
+      word: word.word,
+      start: Math.max(0, word.start - clipStart),
+      end: Math.min(duration, Math.max(word.start - clipStart + 0.12, word.end - clipStart)),
+    }))
+    .filter((word) => word.word.trim() && word.start < duration && word.end > 0);
 }
 
 function buildDefaultEditRecipe(clip: any, text?: string): Record<string, unknown> {

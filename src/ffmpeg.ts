@@ -4,6 +4,12 @@ import path from "path";
 import os from "os";
 import type { BrollAsset } from "./broll.js";
 
+export type CaptionWord = {
+  word: string;
+  start: number;
+  end: number;
+};
+
 export async function tmpDir(prefix = "fs-"): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
@@ -93,8 +99,9 @@ export async function renderClip(opts: {
   subtitle?: string;
   recipe?: Record<string, any> | null;
   brollAssets?: BrollAsset[];
+  captionWords?: CaptionWord[];
 }): Promise<void> {
-  const { source, start, end, outPath, title, subtitle, recipe, brollAssets = [] } = opts;
+  const { source, start, end, outPath, title, subtitle, recipe, brollAssets = [], captionWords = [] } = opts;
   const duration = end - start;
   const recipePreset = typeof recipe?.presetId === "string" ? recipe.presetId : "basic";
   const intensity = Number(recipe?.intensity ?? 45);
@@ -141,19 +148,24 @@ export async function renderClip(opts: {
 
   const caption = escapeDrawText(subtitle || title).slice(0, 110);
   const captionLines = wrapText(caption, recipePreset === "bryce_punchy" ? 18 : 24, 2);
-  const motionStrength = recipePreset === "bryce_punchy"
-    ? Math.max(0.11, Math.min(0.2, intensity / 520))
-    : Math.max(0.04, Math.min(0.12, intensity / 850));
-  const jumpStrength = recipePreset === "doac_clean" ? 0.025 : recipePreset === "bryce_punchy" ? 0.09 : 0.055;
   const baseFilters = [
     "scale=720:1280:force_original_aspect_ratio=increase",
     "crop=720:1280",
-    `scale=w='720*(1+${motionStrength.toFixed(3)}+${jumpStrength.toFixed(3)}*gte(mod(t,3.1),2.55)+0.035*sin(2*PI*t/1.35))':h='1280*(1+${motionStrength.toFixed(3)}+${jumpStrength.toFixed(3)}*gte(mod(t,3.1),2.55)+0.035*sin(2*PI*t/1.35))':eval=frame`,
-    "crop=720:1280:x='(iw-ow)/2+18*sin(2*PI*t/4.7)':y='(ih-oh)/2+10*sin(2*PI*t/3.9)'",
+    buildSteppedPunchScale(recipePreset, intensity),
+    "crop=720:1280",
     "eq=contrast=1.08:saturation=1.12",
     "unsharp=5:5:0.65:3:3:0.25",
   ];
-  const captionFilters = drawBurnedCaptionFilters(captionLines, recipePreset, intensity);
+  const assPath = await writeAssCaptions({
+    words: captionWords,
+    fallback: subtitle || title,
+    outDir: path.dirname(outPath),
+    duration,
+    presetId: recipePreset,
+  });
+  const captionFilters = assPath
+    ? [`subtitles=${escapeFilterPath(assPath)}`]
+    : drawBurnedCaptionFilters(captionLines, recipePreset, intensity);
   const safeBroll = brollAssets
     .filter((asset) => Number.isFinite(asset.start) && Number.isFinite(asset.end) && asset.end > asset.start)
     .slice(0, 8);
@@ -211,7 +223,7 @@ function buildBrollFilterComplex(baseFilters: string[], captionFilters: string[]
     const brollLabel = `broll${index}`;
     const outLabel = `mix${index}`;
     filters.push(
-      `[${input}:v]trim=duration=${duration.toFixed(3)},setpts=PTS-STARTPTS+${start.toFixed(3)}/TB,scale=w='720*(1.12+0.045*sin(2*PI*t/1.8))':h='1280*(1.12+0.045*sin(2*PI*t/1.8))':force_original_aspect_ratio=increase:eval=frame,crop=720:1280:x='(iw-ow)/2+12*sin(2*PI*t/2.6)':y='(ih-oh)/2',eq=contrast=1.1:saturation=1.16,unsharp=5:5:0.55:3:3:0.2,format=yuva420p,fade=t=in:st=${start.toFixed(3)}:d=0.08:alpha=1,fade=t=out:st=${fadeOutStart.toFixed(3)}:d=0.14:alpha=1[${brollLabel}]`,
+      `[${input}:v]trim=duration=${duration.toFixed(3)},setpts=PTS-STARTPTS+${start.toFixed(3)}/TB,scale=820:1458:force_original_aspect_ratio=increase,crop=720:1280,eq=contrast=1.1:saturation=1.16,unsharp=5:5:0.55:3:3:0.2,format=yuva420p,fade=t=in:st=${start.toFixed(3)}:d=0.08:alpha=1,fade=t=out:st=${fadeOutStart.toFixed(3)}:d=0.14:alpha=1[${brollLabel}]`,
       `[${current}][${brollLabel}]overlay=0:0:eof_action=pass:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${outLabel}]`,
     );
     current = outLabel;
@@ -219,6 +231,94 @@ function buildBrollFilterComplex(baseFilters: string[], captionFilters: string[]
 
   filters.push(`[${current}]${captionFilters.join(",")}[v]`);
   return filters.join(";");
+}
+
+function buildSteppedPunchScale(presetId: string, intensity: number): string {
+  const base = presetId === "doac_clean" ? 1.045 : presetId === "bryce_punchy" ? 1.12 : 1.08;
+  const punch = presetId === "doac_clean" ? 0.035 : Math.max(0.07, Math.min(0.14, intensity / 800));
+  const expr = `${base.toFixed(3)}+${punch.toFixed(3)}*between(mod(t,4.0),0.0,0.34)+${(punch * 0.65).toFixed(3)}*between(mod(t,4.0),1.55,1.9)+${(punch * 0.85).toFixed(3)}*between(mod(t,4.0),2.85,3.16)`;
+  return `scale=w='720*(${expr})':h='1280*(${expr})':eval=frame`;
+}
+
+async function writeAssCaptions(opts: {
+  words: CaptionWord[];
+  fallback: string;
+  outDir: string;
+  duration: number;
+  presetId: string;
+}): Promise<string | null> {
+  const phrases = buildCaptionPhrases(opts.words, opts.duration, opts.presetId === "bryce_punchy" ? 2 : 3);
+  if (phrases.length === 0) {
+    const fallback = escapeAssText(opts.fallback).trim();
+    if (!fallback) return null;
+    phrases.push({ start: 0, end: Math.min(opts.duration, 2.8), text: fallback.split(/\s+/).slice(0, 5).join(" ") });
+  }
+
+  const assPath = path.join(opts.outDir, "captions.ass");
+  const primary = opts.presetId === "bryce_punchy" ? "&H004BC8F2" : "&H00FFFFFF";
+  const body = [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    "PlayResX: 720",
+    "PlayResY: 1280",
+    "ScaledBorderAndShadow: yes",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    `Style: Punch,Arial,62,${primary},&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,3,2,38,38,260,1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ...phrases.map((phrase) => {
+      const text = escapeAssText(phrase.text.toUpperCase());
+      const line = `{\\an2\\pos(360,965)\\fad(35,70)\\t(0,110,\\fscx116\\fscy116)\\t(110,250,\\fscx100\\fscy100)}${text}`;
+      return `Dialogue: 0,${formatAssTime(phrase.start)},${formatAssTime(phrase.end)},Punch,,0,0,0,,${line}`;
+    }),
+  ].join("\n");
+
+  await fs.writeFile(assPath, body, "utf8");
+  return assPath;
+}
+
+function buildCaptionPhrases(words: CaptionWord[], duration: number, maxWords: number): Array<{ start: number; end: number; text: string }> {
+  const safeWords = words
+    .map((word) => ({
+      word: word.word.trim(),
+      start: Math.max(0, word.start),
+      end: Math.min(duration, Math.max(word.start + 0.12, word.end)),
+    }))
+    .filter((word) => word.word && word.end > 0 && word.start < duration)
+    .sort((a, b) => a.start - b.start);
+
+  const phrases: Array<{ start: number; end: number; text: string }> = [];
+  for (let index = 0; index < safeWords.length; index += maxWords) {
+    const group = safeWords.slice(index, index + maxWords);
+    phrases.push({
+      start: group[0].start,
+      end: Math.min(duration, Math.max(group[group.length - 1].end + 0.08, group[0].start + 0.42)),
+      text: group.map((word) => word.word).join(" "),
+    });
+  }
+  return phrases;
+}
+
+function formatAssTime(value: number): string {
+  const totalCentiseconds = Math.max(0, Math.round(value * 100));
+  const centiseconds = totalCentiseconds % 100;
+  const totalSeconds = Math.floor(totalCentiseconds / 100);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(centiseconds).padStart(2, "0")}`;
+}
+
+function escapeAssText(value: string): string {
+  return value.replace(/[{}]/g, "").replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function escapeFilterPath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
 }
 
 function drawBurnedCaptionFilters(lines: string[], presetId: string, intensity: number): string[] {
