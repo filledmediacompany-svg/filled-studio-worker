@@ -103,7 +103,7 @@ function normalizeSlots(value: unknown, clipStart: number, clipEnd: number): Bro
       };
     })
     .filter((slot): slot is BrollSlot => Boolean(slot))
-    .slice(0, 4);
+    .slice(0, 8);
 }
 
 async function findPexelsAsset(slot: BrollSlot, workDir: string, index: number): Promise<BrollAsset | null> {
@@ -113,21 +113,10 @@ async function findPexelsAsset(slot: BrollSlot, workDir: string, index: number):
     return null;
   }
 
-  const url = new URL("https://api.pexels.com/v1/videos/search");
-  url.searchParams.set("query", slot.prompt);
-  url.searchParams.set("per_page", "8");
-  url.searchParams.set("orientation", "portrait");
-
   try {
-    const response = await fetch(url, { headers: { Authorization: apiKey } });
-    if (!response.ok) {
-      console.warn(`[broll] Pexels search failed ${response.status} for "${slot.prompt}"`);
-      return null;
-    }
-
-    const json = (await response.json()) as { videos?: PexelsVideo[] };
-    const video = chooseVideo(json.videos ?? []);
-    const file = chooseFile(video);
+    const result = await searchPexelsVideo(derivePexelsQueries(slot.prompt), apiKey);
+    const video = result?.video ?? null;
+    const file = result?.file ?? null;
     if (!video || !file?.link) return null;
 
     const outPath = path.join(workDir, `broll-${index}.mp4`);
@@ -144,6 +133,53 @@ async function findPexelsAsset(slot: BrollSlot, workDir: string, index: number):
     return null;
   }
 }
+
+async function searchPexelsVideo(queries: string[], apiKey: string): Promise<{ video: PexelsVideo; file: PexelsVideo["video_files"][number] } | null> {
+  for (const query of queries) {
+    const url = new URL("https://api.pexels.com/v1/videos/search");
+    url.searchParams.set("query", query);
+    url.searchParams.set("per_page", "12");
+    url.searchParams.set("orientation", "portrait");
+
+    const response = await fetch(url, { headers: { Authorization: apiKey } });
+    if (!response.ok) {
+      console.warn(`[broll] Pexels search failed ${response.status} for "${query}"`);
+      continue;
+    }
+
+    const json = (await response.json()) as { videos?: PexelsVideo[] };
+    const video = chooseVideo(json.videos ?? []);
+    const file = chooseFile(video);
+    if (video && file?.link) return { video, file };
+  }
+  return null;
+}
+
+function derivePexelsQueries(prompt: string): string[] {
+  const lower = prompt.toLowerCase();
+  const queries: string[] = [];
+  if (/\b(god|faith|church|pray|prayer|spiritual|sermon|worship)\b/.test(lower)) queries.push("cinematic church worship prayer");
+  if (/\b(business|company|work|money|career|founder|market|sales|client)\b/.test(lower)) queries.push("cinematic entrepreneur office work");
+  if (/\b(anxiety|fear|alone|depressed|stress|mental|emotion|pain|overwhelmed)\b/.test(lower)) queries.push("cinematic person thinking alone");
+  if (/\b(family|mother|father|kid|child|home|relationship|marriage)\b/.test(lower)) queries.push("cinematic family home");
+  if (/\b(health|body|fitness|doctor|hospital|sleep|brain|therapy)\b/.test(lower)) queries.push("cinematic health lifestyle");
+  if (/\b(podcast|interview|conversation|talk|microphone)\b/.test(lower)) queries.push("podcast interview studio");
+
+  const keywords = lower
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 3 && !COMMON_WORDS.has(word))
+    .slice(0, 4);
+  if (keywords.length) queries.push(`cinematic ${keywords.join(" ")}`);
+  queries.push("cinematic documentary people", "dramatic city night", "close up thoughtful person");
+  return [...new Set(queries)].slice(0, 5);
+}
+
+const COMMON_WORDS = new Set([
+  "that", "this", "with", "from", "have", "there", "their", "about", "what", "when", "were", "your", "they", "just",
+  "like", "think", "know", "because", "really", "going", "would", "could", "should", "thing", "things", "people",
+  "into", "onto", "then", "than", "them", "very", "more", "most", "some", "only", "also", "been",
+]);
 
 function chooseVideo(videos: PexelsVideo[]): PexelsVideo | null {
   return videos

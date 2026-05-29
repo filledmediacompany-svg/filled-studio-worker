@@ -69,7 +69,7 @@ export async function processProject(project: Project): Promise<void> {
       const outPath = path.join(work, `clip-${clip.id}.mp4`);
       try {
         await createRenderJob(clip.id, project.id, project.user_id, "running");
-        const recipe = clip.controls?.edit_recipe ?? null;
+        const recipe = clip.controls?.edit_recipe ?? buildDefaultEditRecipe(clip, sourceClip?.transcript_excerpt || sourceClip?.hook);
         const brollAssets = await prepareBrollAssets({
           recipe,
           clipId: clip.id,
@@ -152,7 +152,7 @@ export async function processRenderJob(job: RenderJob): Promise<void> {
 
     await updateRenderJob(job.id, { progress: 30 });
     const outPath = path.join(work, `clip-${clip.id}.mp4`);
-    const recipe = clip.controls?.edit_recipe ?? null;
+    const recipe = clip.controls?.edit_recipe ?? buildDefaultEditRecipe(clip, clip.transcript_excerpt || clip.hook);
     const brollAssets = await prepareBrollAssets({
       recipe,
       clipId: clip.id,
@@ -284,6 +284,77 @@ async function finishRenderJob(
     console.warn(`[clip ${clipId}] render_jobs update skipped: ${error.message}`);
   }
 }
+
+function buildDefaultEditRecipe(clip: any, text?: string): Record<string, unknown> {
+  const start = Number(clip.start_seconds ?? 0);
+  const end = Number(clip.end_seconds ?? start + 35);
+  const duration = Math.max(8, end - start);
+  const excerpt = String(text || clip.hook || clip.title || "podcast interview breakthrough moment");
+  const brollCount = Math.max(5, Math.min(8, Math.round(duration / 6)));
+  return {
+    id: `worker-bryce:${clip.id ?? "clip"}`,
+    presetId: "bryce_punchy",
+    label: "Bryce Punchy",
+    intensity: 94,
+    hookStrategy: "pattern interrupt",
+    caption: {
+      mode: "kinetic",
+      maxWords: 2,
+      emphasis: "every beat",
+      transition: "pop + snap",
+    },
+    cameraMoves: [
+      { at: start + Math.min(1.1, duration * 0.1), type: "punch-in", scale: 1.22, reason: "hook emphasis" },
+      { at: start + duration * 0.38, type: "jump reframe", scale: 1.18, reason: "idea turn" },
+      { at: start + duration * 0.68, type: "snap zoom", scale: 1.24, reason: "payoff line" },
+    ],
+    brollSlots: buildDefaultBrollSlots(excerpt, start, end, brollCount),
+    soundDesign: {
+      style: "impact",
+      cues: [
+        { at: start + Math.min(1.1, duration * 0.1), type: "impact hit" },
+        { at: start + duration * 0.68, type: "whoosh" },
+      ],
+    },
+  };
+}
+
+function buildDefaultBrollSlots(text: string, clipStart: number, clipEnd: number, count: number) {
+  const duration = Math.max(1, clipEnd - clipStart);
+  const phrases = text.replace(/\s+/g, " ").split(/[,.!?]/).map((part) => part.trim()).filter(Boolean);
+  return Array.from({ length: count }).map((_, index) => {
+    const start = clipStart + duration * ((index + 0.75) / (count + 1.2));
+    const phrase = phrases[index % Math.max(phrases.length, 1)] || text;
+    return {
+      start,
+      end: Math.min(clipEnd, start + Math.min(3.8, Math.max(2.2, duration / 7))),
+      prompt: buildBrollSearchPrompt(phrase),
+      reason: "automatic visual pattern break",
+    };
+  });
+}
+
+function buildBrollSearchPrompt(value: string): string {
+  const lower = value.toLowerCase();
+  if (/\b(god|faith|church|pray|prayer|spiritual|sermon|worship)\b/.test(lower)) return "cinematic church worship prayer";
+  if (/\b(business|company|work|money|career|founder|market|sales|client)\b/.test(lower)) return "cinematic entrepreneur office work";
+  if (/\b(anxiety|fear|alone|depressed|stress|mental|emotion|pain|overwhelmed)\b/.test(lower)) return "cinematic person thinking alone";
+  if (/\b(family|mother|father|kid|child|home|relationship|marriage)\b/.test(lower)) return "cinematic family home";
+  if (/\b(health|body|fitness|doctor|hospital|sleep|brain|therapy)\b/.test(lower)) return "cinematic health lifestyle";
+  if (/\b(podcast|interview|conversation|talk|microphone)\b/.test(lower)) return "podcast interview studio";
+  const keywords = lower
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 3 && !DEFAULT_BROLL_STOPWORDS.has(word))
+    .slice(0, 4);
+  return keywords.length ? `cinematic ${keywords.join(" ")}` : "cinematic documentary people";
+}
+
+const DEFAULT_BROLL_STOPWORDS = new Set([
+  "that", "this", "with", "from", "have", "there", "their", "about", "what", "when", "were", "your", "they", "just",
+  "like", "think", "know", "because", "really", "going", "would", "could", "should", "thing", "things", "people",
+  "into", "onto", "then", "than", "them", "very", "more", "most", "some", "only", "also", "been",
+]);
 
 async function updateRenderJob(jobId: string, fields: Record<string, unknown>): Promise<void> {
   const { error } = await supabase.from("render_jobs").update(fields).eq("id", jobId);

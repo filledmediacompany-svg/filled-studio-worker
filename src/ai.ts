@@ -18,10 +18,14 @@ export type DetectedClip = {
 
 export async function detectClips(transcriptText: string, duration: number): Promise<DetectedClip[]> {
   const system =
-    "You are an expert short-form video editor. Given a podcast transcript, identify the 5 most viral 30-90 second moments. Score by hook strength, retention, emotional payoff, and shareability. Return JSON only.";
-  const user = `Transcript (duration ${duration}s):\n${transcriptText}\n\nReturn JSON: { "clips": [{ "title": string, "hook": string, "start_seconds": number, "end_seconds": number, "virality_score": number, "hook_score": number, "retention_score": number, "transcript_excerpt": string }] }`;
+    "You are an expert short-form video editor. Given a podcast transcript, identify up to 20 viral 25-75 second moments. Prefer complete ideas with a strong first sentence, tension, a turn, and a payoff. Score by hook strength, retention, emotional payoff, and shareability. Return JSON only.";
+  const user = `Transcript (duration ${duration}s):\n${transcriptText}\n\nReturn JSON: { "clips": [{ "title": string, "hook": string, "start_seconds": number, "end_seconds": number, "virality_score": number, "hook_score": number, "retention_score": number, "transcript_excerpt": string }] }\nReturn as many strong clips as exist, maximum 20.`;
 
-  if (!LOVABLE_API_KEY && CLIP_DETECTION_PROVIDER !== "openai") {
+  if (CLIP_DETECTION_PROVIDER === "openai") {
+    return detectClipsWithOpenAI(system, user, duration);
+  }
+
+  if (!LOVABLE_API_KEY) {
     return detectClipsLocally(transcriptText, duration);
   }
 
@@ -38,7 +42,7 @@ export async function detectClips(transcriptText: string, duration: number): Pro
   const json: any = await res.json();
   const parsed = parseJsonContent(json.choices?.[0]?.message?.content);
   const clips = Array.isArray(parsed.clips) ? parsed.clips : [];
-  return clips.map((clip: any) => normalizeClip(clip, duration));
+  return clips.map((clip: any) => normalizeClip(clip, duration)).slice(0, 20);
 }
 
 async function detectClipsWithOpenAI(system: string, user: string, duration: number): Promise<DetectedClip[]> {
@@ -64,7 +68,7 @@ async function detectClipsWithOpenAI(system: string, user: string, duration: num
   const json: any = await res.json();
   const parsed = parseJsonContent(json.choices?.[0]?.message?.content);
   const clips = Array.isArray(parsed.clips) ? parsed.clips : [];
-  return clips.map((clip: any) => normalizeClip(clip, duration));
+  return clips.map((clip: any) => normalizeClip(clip, duration)).slice(0, 20);
 }
 
 function detectClipsLocally(transcriptText: string, duration: number): DetectedClip[] {
@@ -91,20 +95,21 @@ function detectClipsLocally(transcriptText: string, duration: number): DetectedC
 
   const windows: Array<{ text: string; start: number; end: number; score: number }> = [];
   let wordCursor = 0;
-  for (let i = 0; i < sentences.length; i += 3) {
-    const group = sentences.slice(i, i + 4);
+  for (let i = 0; i < sentences.length; i += 2) {
+    const group = sentences.slice(i, i + 8);
     const groupText = group.join(" ");
     const words = groupText.split(/\s+/).filter(Boolean).length;
     const start = Math.min(duration, wordCursor * secondsPerWord);
-    const end = Math.min(duration, Math.max(start + 8, (wordCursor + words) * secondsPerWord));
-    wordCursor += words;
+    const naturalEnd = (wordCursor + words) * secondsPerWord;
+    const end = Math.min(duration, Math.max(start + 25, Math.min(start + 75, naturalEnd)));
+    wordCursor += Math.max(1, Math.round(words * 0.55));
     windows.push({ text: groupText, start, end, score: scoreLocalClip(groupText) });
   }
 
   const ranked = windows
-    .filter((clip) => clip.end - clip.start >= 5)
+    .filter((clip) => clip.end - clip.start >= 20)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
+    .slice(0, 20);
 
   const fallback = ranked.length > 0 ? ranked : [{ text, start: 0, end: Math.min(duration, 60), score: 62 }];
   return fallback.map((clip, index) => {
@@ -113,7 +118,7 @@ function detectClipsLocally(transcriptText: string, duration: number): DetectedC
       title: makeLocalTitle(excerpt, index),
       hook: makeLocalHook(excerpt),
       start_seconds: Math.max(0, Math.round(clip.start)),
-      end_seconds: Math.min(duration, Math.max(Math.round(clip.end), Math.round(clip.start) + 5)),
+      end_seconds: Math.min(duration, Math.max(Math.round(clip.end), Math.round(clip.start) + 20)),
       virality_score: clip.score,
       hook_score: Math.min(100, clip.score + 3),
       retention_score: clip.score,
@@ -142,8 +147,9 @@ function makeLocalHook(text: string): string {
 
 function normalizeClip(clip: any, duration: number): DetectedClip {
   const start = clampNumber(clip.start_seconds, 0, Math.max(0, duration - 5));
-  const minEnd = Math.min(duration, start + 1);
-  const end = clampNumber(clip.end_seconds, minEnd, duration);
+  const minEnd = Math.min(duration, start + 20);
+  const maxEnd = Math.min(duration, start + 75);
+  const end = clampNumber(clip.end_seconds, minEnd, Math.max(minEnd, maxEnd));
   const virality = clampNumber(clip.virality_score, 0, 100);
   return {
     title: String(clip.title ?? "Untitled clip").slice(0, 140),

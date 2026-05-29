@@ -141,18 +141,22 @@ export async function renderClip(opts: {
 
   const caption = escapeDrawText(subtitle || title).slice(0, 110);
   const captionLines = wrapText(caption, recipePreset === "bryce_punchy" ? 18 : 24, 2);
-  const motionStrength = Math.max(0.015, Math.min(0.09, intensity / 1100));
+  const motionStrength = recipePreset === "bryce_punchy"
+    ? Math.max(0.11, Math.min(0.2, intensity / 520))
+    : Math.max(0.04, Math.min(0.12, intensity / 850));
+  const jumpStrength = recipePreset === "doac_clean" ? 0.025 : recipePreset === "bryce_punchy" ? 0.09 : 0.055;
   const baseFilters = [
     "scale=720:1280:force_original_aspect_ratio=increase",
     "crop=720:1280",
-    `scale=w='720*(1+${motionStrength.toFixed(3)}*sin(2*PI*t/2.2))':h='1280*(1+${motionStrength.toFixed(3)}*sin(2*PI*t/2.2))':eval=frame`,
-    "crop=720:1280",
-    "eq=contrast=1.04:saturation=1.06",
+    `scale=w='720*(1+${motionStrength.toFixed(3)}+${jumpStrength.toFixed(3)}*gte(mod(t,3.1),2.55)+0.035*sin(2*PI*t/1.35))':h='1280*(1+${motionStrength.toFixed(3)}+${jumpStrength.toFixed(3)}*gte(mod(t,3.1),2.55)+0.035*sin(2*PI*t/1.35))':eval=frame`,
+    "crop=720:1280:x='(iw-ow)/2+18*sin(2*PI*t/4.7)':y='(ih-oh)/2+10*sin(2*PI*t/3.9)'",
+    "eq=contrast=1.08:saturation=1.12",
+    "unsharp=5:5:0.65:3:3:0.25",
   ];
   const captionFilters = drawBurnedCaptionFilters(captionLines, recipePreset, intensity);
   const safeBroll = brollAssets
     .filter((asset) => Number.isFinite(asset.start) && Number.isFinite(asset.end) && asset.end > asset.start)
-    .slice(0, 4);
+    .slice(0, 8);
 
   if (safeBroll.length > 0) {
     const inputs = safeBroll.flatMap((asset) => ["-stream_loop", "-1", "-i", asset.path]);
@@ -207,7 +211,7 @@ function buildBrollFilterComplex(baseFilters: string[], captionFilters: string[]
     const brollLabel = `broll${index}`;
     const outLabel = `mix${index}`;
     filters.push(
-      `[${input}:v]trim=duration=${duration.toFixed(3)},setpts=PTS-STARTPTS+${start.toFixed(3)}/TB,scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,eq=contrast=1.06:saturation=1.1,format=yuva420p,fade=t=in:st=${start.toFixed(3)}:d=0.12:alpha=1,fade=t=out:st=${fadeOutStart.toFixed(3)}:d=0.18:alpha=1[${brollLabel}]`,
+      `[${input}:v]trim=duration=${duration.toFixed(3)},setpts=PTS-STARTPTS+${start.toFixed(3)}/TB,scale=w='720*(1.12+0.045*sin(2*PI*t/1.8))':h='1280*(1.12+0.045*sin(2*PI*t/1.8))':force_original_aspect_ratio=increase:eval=frame,crop=720:1280:x='(iw-ow)/2+12*sin(2*PI*t/2.6)':y='(ih-oh)/2',eq=contrast=1.1:saturation=1.16,unsharp=5:5:0.55:3:3:0.2,format=yuva420p,fade=t=in:st=${start.toFixed(3)}:d=0.08:alpha=1,fade=t=out:st=${fadeOutStart.toFixed(3)}:d=0.14:alpha=1[${brollLabel}]`,
       `[${current}][${brollLabel}]overlay=0:0:eof_action=pass:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'[${outLabel}]`,
     );
     current = outLabel;
