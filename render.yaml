@@ -22,3 +22,5 @@ services:
         value: "5000"
       - key: STALE_PROJECT_MINUTES
         value: "30"
+      - key: STALE_RENDER_JOB_MINUTES
+        value: "20"

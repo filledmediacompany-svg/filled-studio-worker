@@ -131,6 +131,36 @@ export async function requeueStaleProjects(maxAgeMinutes = 30): Promise<number> 
   return count;
 }
 
+export async function failStaleRenderJobs(maxAgeMinutes = 20): Promise<number> {
+  if (!isSupabaseConfigured) return 0;
+
+  const cutoff = new Date(Date.now() - maxAgeMinutes * 60_000).toISOString();
+  const { data, error } = await supabase
+    .from("render_jobs")
+    .update({
+      status: "failed",
+      progress: 0,
+      error_message: `Render timed out after ${maxAgeMinutes} minutes. Please queue it again.`,
+      completed_at: new Date().toISOString(),
+    })
+    .eq("status", "running")
+    .lt("created_at", cutoff)
+    .select("id, clip_id");
+
+  if (error) {
+    console.error("Failed to fail stale render jobs", error);
+    return 0;
+  }
+
+  const stale = data ?? [];
+  for (const job of stale) {
+    await supabase.from("clips").update({ status: "failed" }).eq("id", job.clip_id);
+  }
+
+  if (stale.length > 0) console.warn(`Failed ${stale.length} stale render job(s) older than ${maxAgeMinutes} minutes`);
+  return stale.length;
+}
+
 export async function setStatus(projectId: string, status: string, fields: Record<string, unknown> = {}) {
   const { error } = await supabase.from("projects").update({ status, ...fields }).eq("id", projectId);
   if (error) console.error(`[${projectId}] failed to set project status ${status}`, error);
