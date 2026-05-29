@@ -5,7 +5,7 @@ import { processProject, processRenderJob } from "./pipeline.js";
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5000);
 const PORT = Number(process.env.PORT ?? 3000);
 const STALE_PROJECT_MINUTES = Number(process.env.STALE_PROJECT_MINUTES ?? 30);
-const STALE_RENDER_JOB_MINUTES = Number(process.env.STALE_RENDER_JOB_MINUTES ?? 4);
+const STALE_RENDER_JOB_MINUTES = Number(process.env.STALE_RENDER_JOB_MINUTES ?? 1);
 const STUDIO_APP_URL = process.env.STUDIO_APP_URL ?? "https://filled-studio-app.onrender.com";
 
 type WorkerState = {
